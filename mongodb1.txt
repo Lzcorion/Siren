@@ -1,0 +1,106 @@
+MongoDB
+- 介于关系型数据库和非关系型数据库之间的产品.
+- 分布式文件存储的数据库, 为WEB应用提供可扩展的高性能数据存储的解决方案
+- 数据存储为一个文档(json对象),由(key--value)对组成
+- 支持查询,设置索引
+- 支持集群,数据分片
+
+部署MongoDB 服务.
+
+1.创建工作目录.
+]# mkdir /usr/local/mongodb
+]# cd /usr/local/mongodb
+]# mkdir -p etc log data/db
+2.解压文件.
+]# tar -zxvf  mongodb-linux-x86_64-rhel70-3.6.3.tgz
+]# cd ; cp -r bin /usr/local/mongodb/
+3.手动创建主配置文件.
+]# vim  /usr/local/mongodb/etc/mongodb.conf
+logpath=/usr/local/mongodb/log/mongodb.log  //指定日志信息路径
+logappend=true    //追加方式记录日志信息
+dbpath=/usr/local/mongodb/data/db   //指定数据库目录.必须在data/db下
+fork=true   //以守护进程的方式运行
+
+查看进程: ps -C mongod
+查看端口: ss -ntulp |grep :27017
+启动服务:  /usr/local/mongodb/bin/mongod -f /usr/local/mongodb/etc/mongodb.conf
+停止服务: ./bin/mongod -f /usr/local/mongodb/etc/mongodb.conf --shutdown
+
+可定义别名alias,简化启动和停止服务命令.
+
+没有指定IP地址及端口号.仅可以本机访问自己.(127.0.0.1)
+
+连接mongodb数据库 ===>  /usr/local/mongodb/bin/mongo  
+> help   //查看所有帮助信息.   
+退出:   >exit
+
+启动服务时定义服务使用的IP地址及端口号.(修改配置文件.重启服务)
+]# vim /usr/local/mongodb/etc/mongodb.conf
+  bind_ip=192.168.4.50     //定义启动服务的IP.
+  port=27050 		   //定义启动服务的端口号.
+
+连接mongodb数据库:
+]# /usr/local/mongodb/bin/mongo   //启动失败,因为默认连接的是127.0.0.1:27017
+]# /usr/local/mongodb/bin/mongo --port 27050 --host=192.168.4.50
+mongodb数据库的基本使用:
+常用管理命令:
+Mongodb <---> Mysql    库=库,   集合=表  文档=行
+show dbs    //查看已有的库.
+db   	    //显示当前所在库.
+use 库名    //切换库,没有库则自动创建(延时创建).
+show tables //查看库下已有的集合
+集合名不存在时,自动创建并添加文档.
+db.集合名.find()     	     //查看集合里所有文档.
+db.集合名.find({条件})       //查看集合匹配内容的文档.
+db.集合名.save({key:value})  //只能向文档里存入一条数据.集合不存在自动创建
+db.集合名.count() 	     //统计集合的文档数量.
+db.集合名.findOne() 	     //返回一条文档.
+db.集合名.remove({})	     //删除所有文档.
+db.集合名.remove({条件})     //删除匹配的文档.
+db.集合名.drop() 	     //删除集合.
+db.dropDatabase()    	     //删除当前所在的库
+
+数据基本类型:在Mongodb中,值决定数据类型
+- string字符类型  值用引号引起 "" {name:"bilibili"}
+- bool布尔类型 (true|false)    {x:true} 
+- null 空  表示空值            {x:null}
+- 数值类型. 默认64位浮点型.
+- 数组类型 与Shell相似.   {x:["ddd","kkkk","xxoo"]}
+- 代码类型   {x:function(){/* 代码 /*}} 
+Eg:  db.t1.save({lname:"php",dm:function(){/* <?php echo "haha"; ?> */}})  
+- 日期类型  db.t1.save({name:"jerry",birthday:new Date()})  //函数 new Date()
+- 对象类型 对象id是一个12字节的字符串.(固定的且自动生成的.).唯一标识
+- 内嵌类型 与redis中hash相同.{birdbook:{worker:"bird",pay:99,version:3.0}}
+- 正则类型 {x:/ /} db.t3.save({name:"dd",bds:/.*a.*/}) {bds:/^..$/}
+数据导入导出:
+数据导入:把系统文件的内容存储到集合里.
+ 使用json文件导入数据
+]# mongoimport --host IP --port 端口 -d 库 -c 集合  --type=json  /mdb/xxx.json
+ 使用csv文件导入数据
+]# mongoimport --host IP --port 端口 -d 库 -c 集合 -f --type=csv --headerline --drop /mdb/xxx.csv  
+--headerline  忽略csv文件首行的字段.
+--drop   删除库中该集合的数据后导入.
+
+
+将 /etc/passwd 数据导入mongodb中.csv格式.
+]# cp /etc/passwd  /mdb  ; cd /mdb ; sed -i 's/:/,/g' passwd   
+]# mongoimport --host 192.168.4.50:27050 -d user -c passwd --type=csv --headerline /mdb/passwd.csv
+
+
+数据导出:把集合的文档
+]# mongoexport --host IP --port 端口 -d gamedb -c t1 --type=json  //不用指字段名
+]# mongoexport --host IP -port 端口 -d 库  -c 集合 -f 字段列表 --type=csv 
+
+
+数据备份恢复:
+数据备份:
+]# mongodump --host IP --port 端口    //备份所有.
+]# mongodump --host IP --port 端口 -d 库 -c 集合 -o /mdbbak/ //备份时指定备份的库和备份目录
+]# bsondump   /xxx/xxx.bson   //查看bson文件内容.
+
+数据恢复:
+]# mongorestore --host IP --port 端口 -d 库 -c 集合 /xxx/xxx.bson 
+
+删除要恢复的库再执行恢复
+
+]# mongorestore --host IP --port 端口 /mdb/dump 

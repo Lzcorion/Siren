@@ -1,0 +1,51 @@
+RDBMS. 关系型数据库管理系统(MYSQL ORACLE SQL SERVER)
+NOSQL. 非关系型数据库管理系统(Redis MongoDB Memcached)
+
+部署Redis服务器. 192.168.4.50
+Redis (key/Values) 分布式内存数据库(内存存储关机即丢失)
+Redis支持数据持久化,将内存的数据保存到硬盘.
+支持list.hash.set.zset 数据类型
+支持master-slave 模式数据备份
+中文官网:www.redis.cn
+
+
+源码安装.redis
+redis-4.0.8.tar.gz
+]# tar -zxvf redis-4.0.8.tar.gz
+]# cd redis-4.0.8
+]# rpm -q gcc
+]# make && make install
+
+初始化配置
+]# ./utils/install_server.sh
+配置文件:/etc/redis/6379.conf
+端口:6379
+日志文件:/var/log/redis_6379.log
+Redis数据库路径: Data dir       : /var/lib/redis/6379
+
+/etc/init.d/redis_6379 status  查看redis运行状态
+/etc/init.d/redis_6379 stop  停止redis服务
+/etc/init.d/redis_6379 start 开启redis服务
+
+终端命令行 输入redis-cli  访问数据库
+127.0.0.1:6379>   set  name bob   存数据.
+127.0.0.1:6379>   get  name          取数据.
+切换库 0-15    默认在0库  
+select 0-15
+keys *  打印所有当前库的变量
+keys ??  打印2个字符的变量
+exists key...   查看是否存在变量
+del ab name     删除变量
+ttl keyname     查看生存时间
+返回值为 -1  代表变量永不过期
+expire keyname    设置生存时间
+返回值为 -2  代表变量已过期,会自动删除该变量
+type  keyname
+默认用set 定义的变量都是字符串string
+move keyname db   将变量移动到xx库
+flushdb     删除当前库下的所有变量
+flushall    将所有变量清空
+save        立即存储变量到硬盘
+shutdown  停止redis服务命令   只要服务停止,redis会自动把数据存入硬盘.
+
+

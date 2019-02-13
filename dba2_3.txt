@@ -1,0 +1,211 @@
+部署mysql集群.
+什么是集群: 一群主机提供相同的服务
+集群分类:  HA(高可用) LB(高负载) HPC
+HA:  keepalived  
+LB: LVS HAproxy nginx
+
+MHA(只对MYSQL作高可用集群.)
+MHA软件 + 一主多从结构实现 ===>  mysql高可用集群
+
+MHA 解决MYSQL高可用的解决方案: 
+1.自动故障切换0-30s内 
+2.确保数据一致性.
+
+MHA Manager(管理节点)
+单独部署在一台独立主机. 也可部署在某一台从库上
+MHA Node(数据节点)
+运行在每台MYSQL服务器上
+
+工作过程: 56管理集群
+51-55 1主多从结构 51主 52-55从
+56运行后监视当前主库 51.连接失败时在从库52-55选举新机为主库
+51down  保存51二进制日志信息
+从52-55 看哪台日志更新更接近51主库. 就推选为主库52.
+53-55 有差距. 52数据和51去比较.产生差异信息量.自动传递给53和55
+
+192.168.4.51 主
+192.168.4.52 从.备份主
+192.168.4.53 从.备份主
+192.168.4.54 从.纯备份
+192.168.4.55 从.纯备份
+192.168.4.56 管理主机
+注意:
+1.开启半同步复制模式
+plugin-load=
+rpl-semi-sync-master-enabled=1
+rpl-semi-sync-slave-enabled=1
+2.每个从库默认只保留2个最新的中继日志文件. 需要不自动删除中继日志文件
+relay-log-purge=off
+3. 规划VIP地址. ifconfig eth0:1 192.168.4.100/24
+4.所有机器之间免密登陆.
+ssh-keygen   ssh-copy-id
+一.部署集群环境:
+1.所有主机安装Perl依赖包.  光盘自带和包.
+]# yum -y install perl-*   192.168.4.51-56
+2.所有数据库服务器安装mha-node.
+]# rpm -ivh mha4mysql-node-0.56-0.el6.noarch.rpm  192.168.4.51-56
+3.管理主机上. 安装mha-node 和 mha-manager 192.168.4.56
+]#tar -xf mha4mysql-manager-0.56.tar.gz
+]#cd mha4mysql-manager-0.56 
+安装perl软件包的方法:
+]# which  perl
+]# perl Makefile.PL
+]# make && make install
+4. 部署所有mysql数据库服务器之间可以互相ssh免密登陆.(使用的是对方的root)
+51 52 53 54 55 
+
+二. 部署MHA集群
+1.部署mysql  一主多从  主从同步结构
+配置主库51
+配置备用主库52
+配置备用主库53
+配置纯从库54
+配置纯从库55
+
+
+2.配置主库51
+]# vim /etc/my.cnf
+[mysqld]
+validate_password_policy=0   ##设置密码策略
+validate_password_length=6   ##设置密码长度
+log-bin=master51             ##开启binlog日志
+binlog_format="mixed"        ##设置binlog日志格式
+server_id=51 		     ##指定server_id
+plugin-load = "rpl_semi_sync_master=semisync_master.so;rpl_semi_sync_slave=semisync_slave.so"
+rpl-semi-sync-master-enabled = 1
+rpl-semi-sync-master-enabled = 1  ##启用半同步复制
+relay-log-purge=off  ##不自动删除中继日志.
+]# mysql -uroot -p123456
+mysql> grant replication slave on *.* to repluser@"%"  identified by "123456";
+mysql> show master staus;
+
+
+2.(1)配置备用主库52.(主.从一起配置)
+]# vim /etc/my.cnf
+[mysqld]
+log-bin=master52
+binlog_format="mixed"
+server_id=52
+plugin-load="rpl_semi_sync_master=semisync_master.so;rpl_semi_sync_slave=semisync_slave.so"
+rpl-semi-sync-master-enabled=1
+rpl-semi-sync-slave-enable=1
+relay-log-purge=off
+
+]#mysql -uroot -p123456
+mysql> grant replication slave on *.* to repluser@"%" identified by "123456"
+mysql> change master to master_host="192.168.4.51",master_user="repluser",master_password="123456",master_log_file="xxxxx",master_log_pos=xxx; 
+mysql> start slave;
+mysql> show master status;
+mysql> show slave status\G;
+
+2.(2)配置备用主库53.(主.从一起配置)
+与备用主库52一致.
+
+配置纯从库54.55
+]# vim /etc/my.cnf
+[mysqld]
+server_id=54
+]# mysql -uroot -p123456
+mysql> change master to master_host="192.168.4.51",master_user="repluser",master_password="123456",master_log_file="xxxxx",master_log_pos=xxx;
+mysql> start slave;
+mysql> show slave status\G;
+
+
+3.配置管理主机56.
+{1}.创建主配置文件并根据设置作对应配置
+]# mkdir /etc/mha
+]# cp /root/mha-soft-student/mha4mysql-manager-0.56/samples/conf/app1.cnf  /etc/mha
+]# vim /etc/mha/app1.cnf
+[server_default]
+manager_workdir=/etc/mha  指定工作目录
+manager_log=/etc/mha/manager.log  指定日志文件名
+master_ip_failover_script=/etc/mha/master_ip_failover   管理服务故障切换  
+
+ssh_user=root     免密登陆的用户
+ssh_port=22       免密登陆的端口号
+
+repl_user=repluser   主从同步的用户名
+repl_password=123456  主从同步的密码
+
+user=root            管理主机监控用户时使用的用户
+password=123456      密码【该用户名自定义,但是必须与数据库里授权保持一致】
+
+[server1]     定义数据库服务器
+hostname=192.168.4.51     没有DNS解析.用IP直接输入
+candidate_master=1       51机器竞选主库.
+
+[server2]
+hostname=192.168.4.52
+candidate_master=1     竞选主库均为1.
+
+[server3]
+hostname=192.168.4.53
+candidate_master=1      竞选主库为1.
+
+[server4]
+hostname=192.168.4.54
+no_master=1           不竞选主库.
+
+[server5]
+hostname=192.168.4.55
+no_master=1           不竞选主库.
+
+{2}.把VIP地址192.168.4.100 部署在当前主库51上.
+51]# ifconfig eth0:1 192.168.4.100/24
+51]# ifconfig eth0:1
+
+{3}.在所有数据库服务器上添加监控用户.
+51 mysql> grant all on *.* to root@"%" identified by "123456";
+总结: 
+『1』工作目录
+『2』日志文件名.
+『3』切换故障脚本 目录
+『4』免密登陆的端口与用五
+『5』主从同步的用户名密码
+『6』管理主机监控用户时的用户和密码
+
+{2}.测试主配置文件/etc/mha/app1.cnf
+56]# masterha_check_ssh --conf=/etc/mha/app1.cnf    检测ssh状态.
+ll SSH connection tests passed successfully.
+56]#masterha_check_repl --conf=/etc/mha/app1.cnf    检测主从状态.
+MySQL Replication Health is OK.
+
+{3}.启动管理服务并查看状态信息
+56]# masterha_manager --conf=/etc/mha/app1.cnf --remove_dead_master_conf --ignore_last_failover
+
+--remove_dead_master_conf ===>当51Down时,自动从app1.cnf文件中删除51信息.
+--ignore_last_failover   ===> 故障连续切换8次默认不进行故障切换. 加了ignore选项不管什么情况下运行都进行故障切换.
+
+56]# masterha_check_status --conf=/etc/mha/app1.cnf 
+ 查看状态是否运行.另开终端测试
+
+{4}.测试配置MHA配置.
+1.在主库51上授权访问数据的用户.
+2.客户端50连接vip地址192.168.4.100 访问数据库服务
+3.测试高可用功能
+(1).停止51数据库服务
+(2).客户端50依然可以连接vip地址192.168.4.100 访问数据库服务
+(3).在管理主机56的app1.cnf文件里 主库51的配置被删除了
+(4).所有从库都自动把主库master_host 字段值指向新选举出来的主库IP
+
+{5}.把宕机的主库修复后添加到集群里.
+1.启动51主库的数据库
+mysql> change master to
+          master_user="repluser",
+          master_host="192.168.4.52",
+          master_password="123456",
+          master_log_file="master52.000003",
+          master_log_pos=425;
+2.把51信息写进app1.cnf文件里
+]# vim /etc/mha/app1.cnf
+  [server1]
+  hostname=192.168.4.51
+  candidata_master=1
+3.启动56主机的管理服务
+
+   ]# masterha_check_repl --conf=/etc/mha/app1.cnf
+   ]# masterha_manager --conf=/etc/mha/app1.cnf 
+      --remove_dead_master_conf  
+      --ignore_last_failover 
+4.查看56主机的管理服务状态信息
+ ]# masterha_check_status --conf=/etc/mha/app0.cnf

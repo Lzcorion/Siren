@@ -1,0 +1,168 @@
+NoSQL 第三天.
+环境准备: 取消集群环境,变回最原始redis服务器
+
+配置主从复制:  将192.168.4.52配置成192.168.4.51的从库.
+192.168.4.52:6352>info replication   //查看主从的配置信息
+命令行下配置指定主库信息: (服务重启失效)
+192.168.4.52:6352>slaveof 192.168.4.51 6351   //指定主库为51 端口号
+
+
+主从从结构. 51主. 53从(主为51.) 54从(主为53.)
+192.168.4.54:6354>slaveof 192.168.4.53 6353
+192.168.4.54:6354>info replication  显示为192.168.4.53的从库
+192.168.4.53:6353>slaveof 192.168.4.51 6351
+192.168.4.53:6353>info replication  显示依旧为51的从库,但下面会显示连接数量
+connected_slaves:1
+slave0:ip=192.168.4.54,port=6354,state=online,offset=1930,lag=0
+
+反客为主.
+192.168.4.52:6352>slaveof no one    //手动将从库设置为主库
+192.168.4.52:6352>info replication  //显示变回主库,数据依旧存在
+
+
+51设置密码从如何指定并永久配置?
+设置51密码为123456,并连接上.
+/etc/redis/6379.conf 501行.  requirepass 123456
+修改52主配置文件.
+停止52服务,修改主配置文件. REPLICATION框架下,
+slaveof  192.168.4.51 6351   //指定主库的IP和端口
+masterauth   123456          //连接51主库时所需要的密码.
+
+配置主从从. 51 52 54  
+54]# redis-cli -h 192.168.4.54 -p 6354 shutdown
+54]# vim /etc/redis/6379.conf
+ slaveof 192.168.4.52 6352
+54]# /etc/init.d/redis_6379 start
+54]# redis-cli  -h 192.168.4.54 -p 6354
+192.168.4.54:6354> info replication
+
+哨兵服务:  (主从同步的高可用)
+- 主库宕机后 从库自动升级为主库   192.168.4.52  既运行redis又运行哨兵服务.
+
+52]#哨兵服务配置文件 vim /etc/sentinel.conf
+bind 0.0.0.0     //
+sentinel monitor redis51 192.168.4.51 6351 1 //监控的主机名. IP .端口 . 票数
+//票数: 有几台哨兵服务器连接不上主库时切换主库.
+sentinel auth-pass redis51 123456   //监控的主机名redis51的密码. 
+开启服务: 52]# redis-sentinel /etc/sentinel.conf
+
+测试:  开多一个终端.连接192.168.4.52.将192.168.4.51shutdown, 测试是否自动切换192.168.4.52为主库.
+
+修复51,哨兵模式下 变回从库.并且数据同步.
+
+
+
+REDIS持久化RDB.AOF  默认使用RDB.
+
+RDB: 按照指定时间间隔 将内存中的数据集快照写入硬盘(数据库目录)
+=====>  /var/lib/redis/6379/dump.rdb
+-Snapshot快照.
+
+打开192.168.4.54主配置文件.
+vim /etc/redis/6379.conf
+219-221行.   save 900 1    //每隔900s且有1个变量发生变化,进行存盘
+	     save 300 10   //每隔300s且有10个变量发生变化,进行存盘
+	     save 60 10000 //每隔60s且有10000个变量发生变化,进行存盘
+
+254行.     dbfilename dump.rbd  //文件名
+
+
+备份数据: cp /var/lib/redis/6379/dump.rdb     /root
+停止服务执行!
+恢复数据: cp /root/dump.rdb   /var/lib/redis/6379
+
+手动立刻存盘: -save  //阻塞写存盘  
+-bgsave //不阻塞写存盘
+对rdb作优化的三个选项:
+-rdbcompression  yes|no    CPU处理压缩数据.节省存储空间
+-rdbchecksum    yes/no  对存储的数据作校验. crc16算法.保持一致性和完整性.
+-stop-writes-on-bgsave-error  yes|no  bgsave 出错时停止写操作     影响存盘速度
+
+RDB缺点: 意外宕机时,最后一次持久化的数据会丢失
+RDB优点: 高性能的持久化实现. 单独创建子进程执行持久化。
+
+AOF: 记录redis服务所有写操作. 将新的写操作追加到文件末尾
+cat可以查看的文本文件.
+默认没有启用. 配置文件启用
+appendonly yes  //启用AOF 当RDB和AOF同时存在时,则优先AOF
+/var/lib/redis/6379/appendonly.aof
+备份数据:  cp /var/lib/redis/6379/appendonly.aof   /tmp
+还原数据:  将备份的数据拷贝回redis数据库目录
+
+相关配置参数: 
+appendfsync everysec  //每秒记录一次       
+appendfsync always    //有新写操作立即记录
+把命令写进aof文件的同时写入硬盘
+appendfsync no        //
+只负责把命令写入aof文件里，不同步到硬盘
+
+启用AOF文件,执行命令,AOF文件会越来越大 
+对AOF文件的大小处理方法:
+auto-aof-rewrite-percentage 100   重写之后的数据达到百分100%后再次重写.
+auto-aof-rewrite-min-size   64mb  达到64mb时,对aof文件的内容做重写,将相同的命令合并,使文件变小
+
+aof文件达到64mb时，重写，变为40MB，设置中的百分比,100% 当aof文件达到80mb时,再次合并文件.下
+
+
+修复AOF文件.
+redis-check-aof  --fix appendonly.aof  --->对有问题的文件作检测,
+RBD拷贝数据 AOF拷贝命令
+优点: 意外宕机仅丢失1秒的数据.
+缺点: 文件的体积比RDB大.   执行fsync策略速度比RBD方式慢.
+
+
+
+对不同类型的数据管理.
+string字符串:  set key values  EX 秒  PX 毫秒  NX 不存在变量则赋值
+-从偏移量开始重写key的特定为的值  (用来修改变量的部分数据)
+-setrange key offset value 
+-strlen key  统计字符串长度
+-append key value   存在则追加,不存在则创建key及value
+
+decrby  key   值自-1
+
+mget   获取多个变量的值
+getrange   key start end  
+
+对列表管理的命令 lpush  llen  lrange lpop lindex  
+
+负数为最尾部数据!!!!!!!!! 0为第1个
+
+lpush 将一个或多个值插入到key中.  
+lpush list a b c   //list值为c b a  先进后出
+lrange key start stop  //查看清单....
+lrange list 0 2  //从0位开始,读到2位位置. 0 1 2
+lrange list 0 -1 //从开始到读到结束为止.
+lrange list 0 -2 //从开始读到倒数第2个.
+
+lpop key  移除并返回表头元素数据  key不存在则返回nil. 
+
+llen key  统计列表中数据个数.
+
+lindex key index  
+
+lindex list 0  ; lindex list 2 ; lindex -2 
+
+lset key index value  
+将key中index位的值修改为变量.
+lset list 2 haha    ===> 将list列表中第3个值改为haha
+
+rpush key value 
+将值插入到key的末尾.
+rpush 末尾 --->  lpush 头部
+rpop key 删除尾部第一个值 -->  lpop  删除头部第一个值 
+
+
+hash表.  --一个变量存多列.
+hset hget hmset hmget hkeys hgetall hvals
+
+hset key field value
+hget key field
+hmset key field value   ---> 同时给hash表中的多个field赋值
+hmget key field ---->返回 多个文件的值
+hkeys key 返回hash表中所有field名称
+hgetall key 返回hash表中所有key名和对应的值列表
+hvals key 返回hash表中所有的key值
+hdel key field  删除hash表中多个field值,不存在则忽略  
+
+

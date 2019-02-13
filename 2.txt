@@ -1,0 +1,255 @@
+修改Redis服务的运行配置参数:  //后期对Redis作优化
+  vim /etc/redis/6379.conf
+常用配置选项:
+port //指定端口.
+bind //指定IP地址.
+tcp-backlog    //tcp连接总数   同一时刻tcp连接的并发个数 默认是511个.
+timeout  //连接超时时间 默认是0. 
+tcp-keepalive   //客户端与redis长时间保持连接. 默认300s  
+deamonize yes //守护进程方式运行. 在内存里持续处于活跃状态
+datasbases 16 //数据库个数
+logfile /var/log/redis_6379.log  //pid文件
+maxclients 10000 //并发连接数量
+dir /var/lib/redis/6379  //指定数据库目录
+
+内存管理:  内存清除策略
+redis 存在内存中.当存满内存后,redis无法写入数据. 
+
+-volatile-lru //删除最近最少使用(仅对设置了生存时间的变量(key)有效) expire key
+-allkey-lru   //删除最近最少使用的变量(针对内存里所有.)
+-volatile-random  //随机删除设置生存时间的key
+-allkeys-random  //随机删除key(所有.)
+-volatile-ttl //移除最近过期的key  --->生存时间越短,越早移出
+-noeviction   //不删除任何key, 写满报错.
+
+选项:
+-maxmemory-policy  noeviction  //定义使用内存清楚策略.默认使用不删除.
+生产环境下不使用noeviction
+
+-maxmemory     //定义最大内存.以字节为单位
+
+-maxmemory-samples 5 //把存储在内存里要删除的key  参照的模版变量的个数.(lru.ttl) 进行比对删除.
+
+
+默认没有定义密码. 停止redis服务
+]# /etc/init.d/redis_6379 stop
+
+]# vim /etc/redis/6379.conf
+bind 192.168.4.50  //定义IP为192.168.4.50
+port 6350   	   //定义端口为6350
+#########################SECURITY 安全服务##################################
+requirepass 123456  //设置连接密码
+
+登陆redis 
+redis-cli --help     //查看帮助 -h 指定hosts  -p 指定端口 -a 指定密码
+
+没有输入密码时,也可以登陆到redis里.
+但进行操作时会报错  (error) NOAUTH Authentication required.
+
+192.168.4.50:6350> auth 123456 
+OK
+
+更改IP.端口后不能使用 /etc/init.d/redis_6379 stop
+关闭{1}. killall -9 redis-server
+再去启动服务会报错. 解决方法 将 /var/run/redis_6379.pid 删除 
+
+{2}.命令停止redis
+redis-cli -h 192.168.4.50 -p 6350 -a 123456  shutdown
+
+{3}.修改脚本代码..
+
+
+部署LNMP+redis
+
+1.源码安装nginx.
+]# yum -y install  gcc openssl-devel pcre-devel zlib-devel
+]# tar -xf nginx-1.12.2.tar.gz
+]# cd nginx-1.12.2
+]# ./configure --prefix=/usr/local/nginx
+]# make && make install
+开启php功能.
+        location ~ \.php$ {
+            root           html;
+            fastcgi_pass   127.0.0.1:9000;
+            fastcgi_index  index.php;
+           # fastcgi_param  SCRIPT_FILENAME  /scripts$fastcgi_script_name;
+            include        fastcgi.conf;
+        }
+启动nginx服务 
+]# /usr/local/nginx/sbin/nginx 
+]# /usr/local/nginx/sbin/nginx  -t  查看配置文件是否有语法错误.
+]# ss -ntulp |grep 80   查看nginx是否启用.
+2.安装php-fpm
+]# yum -y install php-fpm-5.4.16-42.el7.x86_64.rpm
+]# systemctl start php-fpm
+]# ss -ntulp |grep 9000
+
+编写php脚本测试:
+]# vim /usr/local/nginx/html/test.php
+<?php
+phpinfo();
+?>
+
+打开真机浏览器 访问 php文件  http://192.168.4.50/test.php
+
+安装提供redis模块的软件包.
+]# yum -y install php    //提供php相关命令及配置文件
+]# yum -y install autoconf automake   //安装php-devel所需的依赖包.
+]# rpm -ivh  php-devel-5.4.16-42.el7.x86_64.rpm 
+]# tar -xf php-redis-2.2.4.tar.gz
+]# cd phpredis-2.2.4
+]# phpize   //检测php环境
+]# ./configure --with-php-configure=/usr/bin/php-config
+]# make && make install
+Installing shared extensions:     /usr/lib64/php/modules/
+]# ls /usr/lib64/php/modules   //查看模块文件
+
+配置php加载模块.
+]# vim /etc/php.ini
+修改728行,去掉注释;   extension_dir = "/usr/lib64/php/modules"  //模块存放路径
+730行. 指定模块名     extension = "redis.so"
+]# systemctl restart php-fpm
+]# php -m 查看支持的模块   |grep -i redis
+
+验证配置: (验证是否可以在Nginx下连接到redis并写入或读取数据.)
+192.168.4.50 开启redis服务.
+在Nginx上.创建连接redis的php网页.
+]# vim /usr/local/nginx/html/linkredis.php
+ <?php
+$redis = new redis();
+$redis->connect('192.168.4.50',6350);
+$redis->auth("123456");
+$redis->set('school','tarena');
+echo $redis->get('school');
+?>
+客户端测试: http://192.168.4.50/linkredis.php
+
+
+
+环境准备: 
+准备6台(51,56) redis服务器  
+一.创建redis集群
+1.1 启用集群功能.
+停止redis服务,修改配置文件.
+]# vim  /etc/redis/6379.conf
+bind  192.168.4.51  //只写物理接口的IP
+port  6351  //端口
+cluster-enabled yes   //启用集群配置
+cluster-config-file nodes-6351.conf  //定义本机保存集群信息的文件
+cluster-node-timeout 15000    //当前机器与其他主机通讯超时时间.毫秒为单位
+]# /etc/init.d/redis_6379 start     //启动redis服务
+]# ss -ntulp |grep redis-server     //查看状态信息
+]# ls /var/lib/redis/6379/node-6351.conf   ---> 集群初始信息
+
+创建redis集群要求所有redis数据为空.
+
+redis-cli -h 192.168.4.55 -p 6355 
+192.168.4.55:6355> cluster info    //查看集群信息
+192.168.4.55:6355> cluster nodes   //查看集群节点.
+
+192.168.4.51 即做管理主机,又做redis服务器.
+2.1创建集群.部署ruby脚本执行环境.
+redis-3.2.1.gem
+ruby-devel-2.0.0.648-30.el7.x86_64.rpm
+]# yum -y install ruby rubygems
+]# rpm -ivh ruby-devel-2.0.0.648-30.el7.x86_64.rpm
+]# gem install redis-3.2.1.gem
+2.2创建管理集群的ruby脚本.
+]# cd  redis-4.0.8/
+]# echo $PATH
+]# mkdir /root/bin
+]# cp redis-4.0.8/src/redis-trib.rb  /root/bin
+]# chmod +x /root/bin/redis-trib.rb
+]# redis-trib.rb help
+
+3.创建集群:
+]# redis-trib.rb create --replicas 1   //要求一个主库有多少个从库.
+ 主库要求有3个, 才能实现高可用.   replicas 后指定的就是从库个数.
+相当于 3个主库 每个主库下有1个从库.     
+生成集群前提:安装redis服务器的机器必须要启用集群功能.
+
+]# redis-trib.rb create --replicas 1 \
+192.168.4.51:6351 192.168.4.52:6352 192.168.4.53:6353 192.168.4.54:6354
+192.168.4.55:6355 192.168.4.56:6356
+
+排错思路:
+集群功能必须开启.
+还原环境. (所有主机) 
+]# rm -rf /var/lib/redis/6379/*
+停服务
+]#  redis-cli -h x.x.x.x -p xxxx shutdown
+重新开启服务
+]# /etc/init.d/redis_6379 start   
+再次执行创建集群的命令.
+]# redis-trib.rb create --replicas 1 \
+
+
+4.测试集群. 在50主机访问集群存取数据
+mysql50 ]# redis-cli -c -h 192.168.4.51 -p 6351
+存入数据时会随机切换到任意的redis集群主库上.并且同步到从库.
+
+在管理主机192.168.4.51上,可以查看数据存储情况及集群信息.
+]# redis-trib.rb info 192.168.4.51:6351
+]# redis-trib.rb check 192.168.4.51:6351
+
+主库宕机后,对应的从库自动升级成为主库.
+将宕掉的机器修复好后,开启服务时会自动添加回集群.成为从库
+
+
+
+redis集群工作过程:
+hash slot 有16384个. 范围:0-16383
+被选举出的主库,平均分配16384个hash槽位  只用来定位存取数据
+crc16算法  将变量做hash运算. 将数字和16384取余
+变量  crc16 hash运算 % 16384   =  hash槽范围
+
+
+二. 管理集群
+2.1 向集群里添加新主机
+2.1.1 添加master角色  192.168.4.51
+]# redis-trib-rb add-node 192.168.4.57:6357  192.168.4.51:6351 //添加新redis主机到管理主机上.默认为master.但没有hash槽.
+]# 重新分片(给新的redis主机hash槽). redis-trib-rb reshard 192.168.4.51:6351
+- 指定移出的hash槽个数.
+- 指定接收hash槽的主机ID.
+- 指定移出的hash槽主机ID.   all 相当于从所有Master上获取hash槽.
+- 同意这样分片 yes
+检查主机 ]#  redis-trib.rb check 192.168.4.51:6351
+
+2.1.2 添加slave角色
+如果没有添加指定的主机添加是谁的从库,那么默认谁的从库最少就成为谁的从库.
+从库个数相等,则随机指定.
+]# redis-trib.rb add-node --slave 192.168.4.58:6358  192.168.4.51:6351
+
+2.2 从集群里移除主机
+当把主机移除的时候,会把对应主机的服务停掉.
+2.2.1 移除master角色
+]# 移除hash槽.    redis-trib-rb reshard 192.168.4.51:6351
+ 指定移出hash槽个数     4096
+ 指定接收hash槽主机ID  任意一个主库的ID
+ 指定移出hash槽主机ID  57主机的ID值
+ Source node #1: 57主机的ID值
+ Source node #2: done
+                 yes
+]# 移除master角色. 
+2.2.2 移除slave角色
+]# redis-trib.rb del-node 192.168.4.51:6351  要删除的主机ID值.
+
+
+
+重新平均分配hash槽. ]# redis-trib.rb rebalance 192.168.4.51:6351
+192.168.4.51:6351> info replication  查看主从角色信息.
+
+ 通过hash槽存储数据. 移除数据不需要做备份.
+
+把移除的redis服务器再次添加回集群中
+192.168.4.57:6357> cluster reset  重置集群信息.
+192.168.4.51]# redis-trib.rb    add-node 192.168.4.57:6357(主) 192.168.4.51:6351
+192.168.4.51]# redis-trib.rb   reshard 192.168.4.51:6351
+192.168.4.51]# redis-trib.rb add-node--slave 192.168.4.58:6358 192.168.4.51:6354
+
+如果先移除主库.对应的从库状态如何?
+主库坏了,从库顶替主库位置.成为主库.
+手动移除主库(57),移除57hash到52上并删除节点,则57对应的从库58,变成了52的从库
+
+什么情况下集群回无法工作？
+一组主从同时损坏.

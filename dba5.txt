@@ -1,0 +1,284 @@
+select user from mysql.user;
+select host,user from mysql.user;
+查看权限：show grants for  用户名@客户端地址
+show grants for "mysql.sys"@localhost;
+mysql,user 表  记录用户信息,访问权限
+show grants for root@localhost;
+select * from  mysql.user where host="localhost" and user="root" \G;
+
+show databases;
+ mysql.db   存储授权用户对数据库的访问权限
+select * from mysql.db  where db="db4";
+ mysql.tables_priv 存储授权用户对表的访问权限 
+show databases;
+use db4;
+show tables;
+select * from mysql.tables_priv;
+select * from mysql.tables_priv where db="db4" and Table_name="t1";
+mysql.columns_priv  存储授权用户对字段的访问权限
+select * from mysql.columns_priv;
+grant 权限列表 on 库.表 to 用户名@客户端地址 identified by "密码"
+grant all on *.* to root@"192.168.4.51" identified by  "密码"
+select @@hostname; 查看当前服务器;
+select user(); 当前终端的访问是谁来连的;
+show grants; 连到服务器的用户查看自己的访问权限;
+
+客户端地址的表述方式：
+%  匹配所有主机
+192.168.1.%  匹配一个网段
+192.168.1.1  匹配指定IP
+%.tarena.com 匹配DNS区域
+svr1.tarena.com  匹配指定域名
+with grant option;
+
+
+
+mysql> grant select,insert,update(name,uid) on db4.t2
+    -> to
+    -> yaya@"192.168.4.%" identified by "123qqq...A"
+    -> with grant option;   改用户可以降自己拥有的权限授权给别人
+
+root@mysql51   mysql -h 192.168.4.50 -u yaya -p"123qqq...A"
+show grants;
+delete from db4.t2;  失败,权限不足
+grant select,insert,update(name,uid) on db4.t2 to yaya2@"192.168.4.%" identified by "123qqq...A"; 失败，权限不够
+
+===> mysql50   grant insert on mysql.* to yaya@"192.168.4.%";
+给mysql库下所有表授权给yaya才可以让yaya用户授权
+
+root@mysql51~]# mysql -h 192.168.4.50 -uyaya -p123qqq...A
+SHOW GRANTS;
+USE db4;
+SHOW TABLES;
+DELETE FROM USER;
+insert into user(name) values("dachui");
+select name from user where name="dachui";
+update user set gid=100 where name="root";
+
+grant select,insert,update(name,uid) on userdb.user to yaya@"192.168.4.%" identified by "123qqq...A";
+
+撤销权限：
+revoke 权限  on 库.表 to 用户@"地址"  撤销权限,用户仍然存在
+select user,host from mysql.user;
+show grants for root@"192.168.4.51"
+revoke grant option on *.* from root@"192.168.4.51";
+revoke delete,update on *.* from root@"192.168.4.51";
+revoke all on *.* from root@"192.168.4.51";
+select user,host from mysql.user where user="root" and host="192.168.4.51";
+删除授权用户
+drop user root@"192.168.4.51"
+
+授权用户连接后修改登陆密码：
+set password=password(新密码);
+管理员可以授权修改用户连接密码：
+set password for 用户名@客户端地址=password("");
+在50本机授权可以在本机登陆的用户：
+mysql> grant all on userdb.* to tom@"localhost"
+identified by "123qqq...A";
+
+
+
+
+
+
+数据备份与恢复：
+一 数据完全备份与恢复   mysqldump
+物理备份：直接拷贝库和表的文件
+备份：cp -rp /var/lib/mysql/数据库    备份目录/文件名
+tar -zcvf xxx.tar.gz  /var/lib/mysql/数据库/*
+恢复： cp -rp  备份目录/文件名   /var/lib/mysql/数据库
+tar -zvxf  xxx.tar.gz   /var/lib/mysql/数据库/
+mysql50~ ]# cp -rp /var/lib/mysql  /mysql.bak  
+将数据库所有文件拷贝到/mysql.bak下
+rsync -avz /mysql.bak   192.168.4.51:/var/lib/mysql
+将/mysql.bak所有文件  同步到 192.168.4.51:/var/lib/mysql
+生产环境少用,优点：备份简单 
+局限性：1.时间长  2.跨平台性差 不适用于数据量大的情况
+
+
+逻辑备份：命令/运用第三方软件,对现在已有的数据作备份
+数据备份策略： 
+完全备份  备份所有数据
+增量备份 备份上次备份后，所有新产生的数据
+差异备份 备份完全备份后，所有新产生的数据
+增量备份和差异备份  参照点不同
+工作中备份方式： 备份频率
+00 23 * * 1 /root/allbak.sh
+30 23 * * 2-7 /root/newbak.sh
+2019-01-10.sql
+2019-01-11.sql 备份文件名标识性,方便管理
+
+备份文件存放在独立设备里,不要存在数据库服务器本机
+
+完全+增量 
+完全备份 ： 
+  mysqldump -uroot -p123456 -A 备份所有数据  > /mysql.bak/full.sql 所有数据
+  mysqldump -uroot -p123456 userdb  > /mysql.bak/userdb_full.sql userdb库
+  mysqldump -uroot -p123456 db4 t3 > /mysql.bak/db4_t3.sql db4库下的t3表
+  mysqldump -uroot -p123456 -B db4 userdb > /mysql.bak/twodb.sql db4库和userdb库
+恢复操作：
+mysql -uroot -p root 库名< 路径/xxx.sql
+只要不是对单个库作备份的,都不需要创建库.
+
+实时增量备份：
+1.启用mysql服务的binlog日志文件实现的
+binlog日志的使用：
+修改配置文件： /etc/my.cnf(多选题)mysql索引类型的类型有哪些？
+
+[mysqld]
+log-bin
+server_id=50
+#log-bin=路径  指定目录生成  
+3.1.4 手动生成新的日志文件方法
+*默认日志文件大于500M时自动创建新日志文件
+
+]# systemctl  restart mysqld
+
+mysql> flush logs;
+
+]# mysql -uroot -p密码 -e "flush logs"
+
+]# mysqldump  -uroot -p密码  --flush-logs  库名  > 目录/xx.sql
+
+使用一个新的日志文件 记录 新创建的webdb库的初始操作。
+mysql> flush  logs;
+mysql> create database webdb; create table webdb.a(id int);
+mysql> insert into webdb.a values(100);
+mysql> insert into webdb.a values(101);
+mysql> flush logs;
+
+删除已有的binlog日志：
+mysql > purge master logs to "binlog文件名";
+删除指定日志之前的文件
+mysql > reset master;
+删除所有日志文件重新生成第一个日志文件;
+db4 t3 > /mysql.bak/db4_t3.sql db4库下的t3表
+show master status; 当前正在使用的日志文件名和偏移量
+insert into db6.t2 values(888);
+show master status;  偏移量发生改变;
+执行到包含commit的行,  
+mysqlbinlog --start-position=数字  /var/lib/mysql/mysql50-bin.000004 
+从指定的数字到结尾
+mysqlbinlog --stop-position=数字  /var/lib/mysql/mysql50-bin.000004
+从开头到指定的数字结尾
+mysqlbinlog --start-position=数  --stop-position=数  /var/lib/mysql/mysql50-bin.00004
+指定开头指定结尾，界定范围
+
+
+使用日志恢复数据:
+mysqlbinlog [选项]  mysql-bin.0000001 |mysql -uroot -p123456
+--start-position=   
+commit 在 at下面   at执行后面的命令,一个at一个命令结尾.
+备份过程中锁表,使用户不能作读写操作
+
+
+XtraBackup
+优点:备份过程中不锁表,适合生产环境
+仅支持Innodb和XtraDB 存储引擎,能够实现增量备份。
+innobackupex： 支持MYISAM 不能实现增量备份,只能实现完全备份
+
+1.装包, perconna-xtrabackup-24-2.4.7-1.el7.x86_64.rpm
+
+2.man innobackupex 查看命令帮助
+
+innobackupex <选项>
+innobackupex 
+ --user root --password 123456 /allback(不用手动创建,备份时自动生成) 生成后产生子目录,子目录命名为为时间戳   --no-timestamp(不使用时间戳命令,) 
+完全备份与恢复
+选项和值用空格间隔:
+--host  默认为localhost   --port 默认3306  --databases 默认备份所有.
+--databases="db4,db5"  dirname(备份时自动创建并存储备份数据) 
+# 指定对两个库进行备份  
+用innobackupex 程序备份数据 恢复数据时要求数据库为空/var/lib/mysql/ 
+]# innobackupex --user root --password 123456
+
+恢复:
+1.准备恢复数据
+2.把备份文件拷贝回数据库目录下
+3.修改数据库目录的所有者和组用户为mysql
+4.启动数据库服务
+5.管理员登陆查看数据
+systemctl stop mysqld
+innobackupex --apply-log /allbak  准备恢复数据
+cat /allbak/xtrabackup_checkpoint
+backup_type = full-backuped   没有执行准备恢复数据操作时
+backup_type = full-prepared   执行准备恢复数据操作时
+数据库里为空才可执行,否则执行失败
+rm -rf /var/lib/mysql/*
+innobackupex --copy-back /allbak
+chown -R mysql:mysql /var/lib/mysql
+systemctl start mysqld
+增量备份与恢复
+增量备份：备份上次备份后所有新产生的数据
+1 完全备份  innobackupex --user --password /allbak --no-timestamp
+2-7  增量备份 
+周一：]# innobackupex --user root --password 123456 /fullbak --no-timestamp
+mysql> insert into db5.a  values(8888);   10次
+周二：innobackupex --user root --password 123456 --incremental /new1 --incremental-basedir=/fullbak --no-timestamps
+cat /new1/xtrabackup_checkpoints
+backup_type = incremental
+mysql> insert into db5.a values(7777);  10次
+周三: innobackupex --user root --password 123456 --incremental /new2 --incremental-basedir=/new1  --no-timestamps
+
+
+
+
+
+
+/var/lib/mysql/ib_logfile* 存放已提交的 ===>  备份目录下  xtrabackup_logfile
+/var/lib/mysql/ibdata1   存放未提交的  ====> 备份目录下  ibdata1
+
+cat /fullbak/xt_checkpoints
+from_lsn = 0
+to_lsn = 2942551    数据库目录日志下的最后范围 lsn 日志序列号 序列号范围记录的数据在 logfile下
+
+恢复时需要合并日志,才能恢复数据。
+
+
+增量恢复数据：
+1.准备恢复数据
+2.合并数据
+3.把备份文件拷贝回数据库目录下
+4.修改目录的所有者和组
+5.启动数据库服务
+6.管理员登陆查看信息   
+mysql> drop database db5;
+mysql> exit
+systemctl stop mysqld
+准备恢复数据：
+innobackupex --apply-log --redo-only /fullbak 
+合并日志：
+innobackupex --apply-log --redo-only /fullbak --incremental-dir=/new1
+innobackupex --apply-log --redo-only /fullbak --incremental-dir=/new2
+恢复数据：
+rm -rf /var/lib/mysql/*
+innobackupex --copy-back /fullbak
+chown -R mysql:mysql /var/lib/mysql
+systemctl start mysqld 
+此时new1和new2 的数据都被合并完成,因此可以将new1和new2 删除
+ rm -rf  /new1 /new2
+
+
+恢复完全备份中的一张数据
+mysql > create table db5.b(name char(10));建表
+mysql > insert into db5.b values("bob");  添加数据
+innobackupex --user root --password 123456 --databases="db5"(对单独一个库作备份) /db5bak --no-timestamp
+mysql > drop table db5.b;
+恢复某一张表数据
+1.导出表信息
+innobackupex --user root --password 123456 --apply-log --export /db5bak
+ls /db5bak/db5
+(多出 a.cfg a.exp  b.cfg b.exp)
+2.创建被删除的b表 (要和原结构一致)
+mysql > create table db5.b(name char(10));建表
+3.删除表空间
+mysql > alter table db5.b discard tablespace; 删除b表的表空间
+4.把导出的表信息文件拷贝到数据库目录下 并修改所有者和组为mysql
+mysql > system cp /db5bak/db5/b.{cfg,exp,ibd}  /var/lib/mysql/db5
+mysql > system ls /var/lib/mysql/db5/b.*
+mysql > system chown mysql:mysql  /var/lib/mysql
+5.导入表信息
+mysql > alter table db5.b import tablespace;
+mysql > select * from db5.b;
+mysql > system rm -rf /var/lib/mysql/db5/b.cfg
+mysql > system rm -rf /var/lib/mysql/db5/b.exp

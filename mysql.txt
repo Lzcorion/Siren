@@ -1,0 +1,223 @@
+ql时   /var/lib/mysql-files
+mysql>  show variables(变量) like "secure_file_priv"；
+修改导出导出数据目录：
+1)退出数据库
+2)修改配置文件  /etc/my.cnf   
+[mysqld]
+secure_file_priv="/mydir"
+mkdir /mydir
+ls -ld /mydir/
+chown mysql    /mydir  //修改权限，使mysql用户有写权限；
+systemctl restart mysqld
+自定义修改导入导出文件时注意一定要让mysql有写入权限。。
+2.2：数据导入  目的：方便对文件里的数据作操作
+数据导入：把系统文件的内容存储到数据库的表里
+数据导入命令
+mysql>  load data infile "目录/文件" into table 库.表 
+field terminated by "分隔符"    --->列
+lines terminated by '\n'    --->行   \n为换行符号
+例子： 创建存储数据的库和表。
+userdb.user
+mysql> create database userdb; //创建库。
+mysql>use userdb;   //创建表。
+mysql>create table user(
+        -> name char(15),
+        -> password char(1),
+        -> uid  int,   
+        -> gid  int,
+        -> commant char(150),   
+        -> homedir char(150),
+        -> shell   char(100),
+        -> index(name)
+        -> );
+字段导入类型一定要匹配。
+执行数据导入命令。
+登陆状态下执行系统命令： system cp /etc/passwd   /mydir
+mysql>load data infile "/mydir/passwd"
+         ->into table user
+         ->fields terminated by ":" 
+         ->lines terminated by "\n";
+mysql> 
+mysql> alter table user
+        -> add
+        -> id int primary key auto_increment first;
+查看数据表记录。
+
+数据导出：
+命令用法： mysql>
+基本格式：SQL查询  into outfile "/mydir/user.txt"; 
+默认导出列间隔为一个TAB键。行为还行符\n
+fields terminated 
+导出文件具有唯一性，不能重名
+
+管理表记录： 增删改查。
+增加时。字段值要与字段类型相匹配
+增 insert into 表名 values()
+多条添加 insert into 表名 values(),(),(),();
+指定字段赋值： insert into 表明(字段名列表)  values()  
+没赋值字段名的均使用默认值或自增长
+
+查询表
+每一行的所有列 ： select * from 表;
+查询字段的行 ： select name,uid,gid from 表;
+where 条件表达式
+
+修改表
+update user
+set
+字段1=值，字段2=值； 不加条件批量修改
+where 指定条件。指定条件修改指定。
+
+删除表记录
+delete from  表名；
+detele from 表名 where 条件表达式
+
+条件表达式：(select delete update)
+数值比较:
+=     <=     >=     !=  符号两边都要是数值类型
+select * from user where 1 = 1  [数字比较]，全部显示
+select * from user where gid = uid 
+select * from user where uid != gid 
+select * from user where id < 10
+select * from user where uid = 100
+
+字符比较：
+ =  !=
+select * from user where shell="/bin/bash"
+select * from user  where shell != “/bin/bash"
+匹配空
+ select name from user where shell is null;
+insert into user(name) values(null);
+select * from user where name is null;
+非空
+select name from user where shell is not null;
+
+
+逻辑匹配(有多个条件的时候使用。数值/字符/其他)
+逻辑与  AND
+select name,uid,gid from user
+where name="root" and uid=0 and gid=0;
+逻辑或  OR
+select name,uid,gid  from user
+where name="root" or uid=3 or gid=1;
+逻辑非
+!  not
+select name from user where name ="root"
+select name from user where name !="root"
+select name from user where name is null;
+select name from user where name is not null;
+
+范围内匹配  ：
+in (值列表)   在....里  
+select name from user where name in ("adm","Bob","root","aaa");
+select name,uid from user where uid in (10,20,30,7);
+not in (值列表)   不在...里
+select name,shell from user where shell not in ("/bin/bash","/sbin/nologin");
+between 数字1 and 数字2
+select * from user where id between 5 and 15;
+distinct 去重显示
+select gid from user;
+select distinct gid from user;
+select shell from user;
+select distinct shell from  user;
+select distinct shell from user where id >=10;
+
+高级匹配条件：
+1. 模糊查询   like     _  %  普通字符
+%：匹配0-N个字符
+select name from user where name like '____'; 匹配4个字符
+select name from user where name like '___'; 匹配3个字符
+select name from user where name like ‘a%’  匹配以a开头
+select name from user where name like '%a%'  匹配包含a的所有
+
+2.正则表达式：
+where 字段名 regexp ‘正则’
+. 任意1个字符
+* 前一次字符0次或多次
+|  或者
+^ 开头
+$ 结尾
+[ ] 匹配
+select name from user where name regexp '^a |^r' ;
+select name from user where name regexp '[0-9]';
+select name from user where name regexp  '^r.*t$';
+
+3.四则运算  +   -   *  /   %
+select name,uid, uid -1 from user where id<=3;
+update user set uid=uid+1 where id <=3;
+select name,uid,gid uid + gid sum from user where id <=3;
+提高优先级：
+select name.uid,gid,(uid+gid)/2 pjz from user where id <=3;
+
+操作查询结果：
+聚集函数（对数字的字段进行统计的函数）
+avg()字段平均值 
+sum()字段总和
+ min()字段中最小值
+ max()字段中最大值
+ count()统计个数
+select avg(uid) from user;
+select avg(uid) from user where uid <=10;
+
+select sum(uid) from user;
+select sum(uid) from user where shell != "/bin/bash"；
+
+select min(uid) from user;
+select min(uid) from user where name like "____";
+
+select max(uid) from user;
+select max(uid) from user where name regexp '^a';
+
+select count(name) from user;
+select count(name) from user where uid between 10 and 15;
+
+查询结果排序：
+SQL查询   order by 字段 asc|desc   
+默认为asc,升序               desc为降序
+select name,uid from user
+where uid >=10 and uid <=500 
+order by uid desc;  设置降序降徐
+
+select name,uid from user 	
+where uid >=10 and uid <=500
+order by uid ;   默认升序
+ 查询结果分组：
+SQL查询 group by 字段名;
+select shell from user group by shell;
+select shell from user where name regexp "a" 1. 模糊查询   like     _  %  普通字符
+group by shell;
+
+过滤查询结果：  having 条件
+
+select name from user where shell != "/bin/bash"
+having name="adm";   查询后放入内存，在内存里寻找数据；提高速度，
+
+select name from user where shell !="/bin/bash" and name="adm";
+结果相同，系统处理的过程不同；
+
+限制查询结果显示行数： limit
+SQL查询 limit X；  显示查询结果的前X行
+SQL查询 limit N,M 显示指定范围内的查询记录  
+N  从查询结果的第N行开始显示    第一行为0  
+M 为显示M行
+
+select * from user;
+select * from user limit 3 ; 显示前3行；
+select * from user limit 0,2  从第一行开始显示，显示2行;
+
+
+Management Service& Utilities 管理工具。 终端命令行 mysql命令划分
+Connection pool  连接池   响应客户端请求：  进程 内存 CPU
+ SQL Interface  SQL接口  命令
+Parser  分析器  是否语法错误
+Optimizer  优化器  自身程序自带，
+caches &	Buffers  查询缓存    存查找过的记录。 空间从物理机的物理内存划分
+
+查看数据库服务支持的存储引擎：
+show engines；
+show table status like "user"; 
+修改默认存储引擎：
+vim /etc/my.cnf
+[mysqld]
+default-storage-engine=存储引擎名称
+systemctl restart mysqld

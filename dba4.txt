@@ -1,0 +1,85 @@
+设置默认存储引擎：
+vim /etc/my.cnf
+default-storage-engine="引擎名"
+查看默认表使用的存储引擎：
+mysql> show table status like "表名"\G;
+查看引擎种类：
+mysql> show engines;
+show variables like "autocommit";
+set autocommit=off
+rollback
+commit
+备份表
+mysql> create table db4.user2 select * from userdb.user;
+mysql> create table db4.user3 select * from userdb.user order by uid desc limit 5 ;
+快速建表：
+mysql> create table db4.user4 select * from userdb.user where 1> 2;
+索引会消失!
+
+select * from t1;
+select * from t2;
+select t1.name t1.uid ,t2.* from t1,t2;
+select t1.name , t2.* from t1,t2;
+select t1.name ,t2.name from t1,t2;
+多表查询：
+select * from t1,t2 where t1.name="root" and t1.uid=1 and t1.name=t2.name;
+select t1.*,t2.password,t2.homedir from t1,t2 where t1.name="root" and t1.uid=1 and t1.name=t2.name;
+where 子查询：
+同一库下的同一表：
+mysql> select name,uid from userdb.user where uid > (select avg(uid)from userdb.user);
+
+mysql> select name from userdb.user where name in 
+(select user from mysql.user where host="localhost" and user="root");
+mysql> create table t3 select name,uid,shell,password from userdb.user limit 6 ;
+mysql> create table t4 select name,uid,shell,password from userdb,user limit 8 ;
+左连接查询（表少的记录在左边）： left join...on...
+查询条件成立时，
+select * from t3 left jpin t4 on t3.name=t4.name and t3.uid=t4.uid;
+右连接查询（表多的记录在右边）： right join ... on...
+select * from t3 right join t4 on t3.name=t4.name and t3.uid=t4.uid;
+相同记录不同记录都显示一遍。
+
+tar -zxvf phpMyAdmin-2.11.11-all-languages.tar.gz   -C /var/www/html/
+   45  cd /var/www/html/
+   46  ls
+   47  mv phpMyAdmin-2.11.11-all-languages/  admin
+   48  ls
+   49  ls /var/www/html/admin/
+   50  ls /var/www/html/admin/index.php 
+   51  cd admin/
+   52  chown -R apache:apache  /var/www/html/admin/
+   53  ls config.sample.inc.php 
+   54  cp config.sample.inc.php  config.inc.php
+部署运行环境
+安装phpmyadmin软件
+修改软件的配置文件
+访问phpmyadmin
+
+修改数据库密码：
+mysqladmin -hlocalhost(本机修改默认为localhost) -uroot -p password "新密码"
+Enter password:旧密码
+
+恢复密码：
+必须要有root权限。
+systemctl stop mysqld
+vim /etc/my.cnf
+注释密码策略
+skip-grant-tables     登陆时不验证用户名和密码
+systemctl start mysqld
+mysql   无需密码直接登陆
+mysql> use mysql
+mysql> show tables;
+desc mysql.user;
+select host,user,authentication_string from mysql.user;（客户端地址,用户名,密码）
+password()  加密函数
+update mysql.user  set authentication_string=password("123qqq...A") 
+where host="localhost" and user="root"；
+flush privileges; 刷新权限
+再次注释 配置文件 /etc/my.cnf
+systemctl restart mysqld
+
+percona  192.168.4.50
+
+
+
+

@@ -1,0 +1,200 @@
+MYSQL读写分离
+MYSQL 多实例
+MYSQL性能调优(DBA2_day05)
+
+一.MYSQL数据读写分离.
+1.什么是数据读写分离.
+    select  读操作
+    insert update delete  写操作
+把读请求和写请求分别给不同的数据库服务器处理.
+
+2.为什么要配置数据读写分离.
+主库承受的并发量大.可以将执行读操作给从库.执行写操作的给主库处理.
+减轻主库并发压力.
+提高从库的硬件利用率. 
+
+3.如何配置数据读写分离.
+人肉分离.(由程序员写程序实现)
+select ----> 主库
+insert update delete ---> 从库
+
+部署数据库读写分离服务器.
+客户端将请求发送给架设在客户端与数据库之间的读写分离服务器上.
+再由读写分离器将客户端的请求分别分发给主库和从库. 主库(写操作).从库(读操作).
+数据读写分离 依托于 主从同步.
+mysql 中间件服务软件:
+	mysql-proxy
+	maxscale   ****  
+	mycat
+实验:
+192.168.4.50 客户端.
+192.168.4.56 读写分离器.   默认主库执行写操作. 从库执行读操作
+192.168.4.51 主库
+192.168.4.52 从库
+(1).配置主从同步结构.
+192.168.4.51 主库  启用binlog日志.用户授权.查看日志文件
+192.168.4.52 从库  指定server_id.指定主库信息
+(2).部署数据库读写分离服务器.192.168.4.56
+{1}.装包. maxscale  提供读写分离服务
+yum -y install maxscale-2.1.2-1.rhel.7.x86_64.rpm
+主配置文件:  /etc/maxscale.cnf   
+cp /etc/maxscale.cnf    /root   重启服务失败时拷贝回/etc下.
+{2}.修改配置文件
+[maxscale] 服务运行后线程启用的个数
+threads=1 默认值.  ====> 修改为 threads=auto  自动配置.
+[server1]   定义第一台数据库服务器. 如果有多台数据库服务器则复制相同行.粘贴
+type=server
+address=192.168.4.51   ip地址
+port=3306   	       端口号
+protocol=MYSQLBackend 后端服务器
+
+[server2]   定义第二台数据库服务器.
+type=server
+address=192.168.4.52 ip地址
+port=3306    	     端口号
+protocol=MYSQLBackend
+
+[MYSQL Monitor] 定义监控的数据库服务器.
+type=monitor
+module=mysqlmon
+servers=server1,server2   监控server1和server2  
+user=maxmon        (监控server1和server2时使用的用户名和密码.)
+passwd=123456      (server1和server2 需要授权给该用户.)
+
+#[Read-Only Service]   定义负责只读服务器.注释.
+
+[Read-Write Service]  定义读写分离服务.
+type=service
+router=readwritesplit
+servers=server1,server2  读写分离服务在server1和server2之间进行.
+user=monscale    查看访问时连接的用户名和密码的帐号
+passwd=123456    获取server1 和server2 的状态信息.(谁主谁从)
+max_slave_connections=100%
+
+[MaxAdmin Service]   定义管理服务. 无需修改配置. 
+
+#[Read-Only Listerner] 定义只读服务使用的端口号.. 注释
+
+[Read-Write Listener] 定义读写分离服务使用的端口号.
+type=listener
+service=Read-Write Service    读写分离服务名
+protocol=MySQLClient
+port=4006
+
+[MaxAdmin Listener]  定义管理服务使用的端口号. 
+port=4016
+
+
+{3}.根据配置文件的配置作对应的设置.
+server1 192.168.4.51 主
+server2 192.168.4.52 从
+grant replication slave,replication client on *.* to maxmon@"%" \
+identified by "123456"
+授权 用户名 maxmon  密码123456 
+ (replication slave(主从状态信息),replication client(运行状态))
+server1 192.168.4.51
+server2 192.168.4.52
+grant select on mysql.* to monscale@"%" identified by "123456" 
+(允许monscale访问授权表向server1和server2查询客户端登陆的用户名和密码是否存在) 
+授权 用户名 monscale  密码 123456
+select user,host from mysql.user;  查看是否授权成功.
+{4}.启动服务
+ maxscale  -f  /etc/maxscale.cnf
+查看服务是否启动:
+ps -C maxscale
+netstat -ntulp |grep 4006
+netstat -ntulp |grep 4016
+没启服务时,读写分离端口和管理服务端口不存在.4006/4016
+停止服务:  pkill  -9 maxscale  
+{5}.查看管理服务信息:
+maxadmin -P(端口) 4016 -uadmin -pmariadb
+MaxScale> list servers (maxmon帐号负责监控后的数据.)
+客户端验证:
+前提:  主库授权给客户端,创建访问数据的用户.
+51.授权访问数据的用户
+mysql > create database bbsdb;
+mysql > create table bbsdb.a(id int);
+mysql > grant select,insert on bbsdb.* to student@"%" identified by "123456";
+52.查看
+mysql > desc bbsdb.a;
+mysql > select user,host from mysql.user; 
+56.在主机50连接数据读写分离服务器192.168.4.56
+mysql -h192.168.4.56 -P4006 -ustudent -p123456
+mysql > select * from bbsdb.a;
+mysql > insert into bbsdb.a values(10);
+在52本机插入一条记录. 测试select和insert分别由哪个库执行操作.
+4.在维护数据读写分离注意事项.
+缺点: 单点故障.56Down
+解决方法:高可用HA 集群. 56为主.57为备份. 作读写分离的高可用集权
+缺点: 数据库服务器也存在单点故障.主库Down,读写分离失效.
+从库Down, 读写分离全由主库实行.
+解决方法: 修改主从同步结构.
+
+MYSQL多实例.
+概念:在一台物理主机上运行多个数据库服务
+优点:节约运维成本. 提高硬件利用率.
+
+192.168.4.50
+systemctl stop mysqld 
+停止50主机rpm包的数据库服务.
+mv /etc/my.cnf  /root
+
+装源码包.
+tar -zxvf mysql-5.7.20-linux-glibc2.12-x86_64.tar.gz
+mv mysql-5.7.20-linux-glibc2.12-x86_64   /usr/local/mysql
+ls /usr/local/mysql
+
+多实例的配置:
+1)装包
+2)修改主配置文件. /etc/my.cnf  没有自行创建
+[服务编号]
+port=                ##端口号
+datadir=             ##数据库目录
+log-error=           ##错误日志
+pid-file=            ##进程pid号
+socket=sock文件      ##负责传递数据
+[mysqld_multi]
+mysqld = /usr/local/mysql/bin/mysqld_safe
+mysqladmin = /usr/local/mysql/bin/mysqladmin
+user = root   #指定多实例是由哪个用户启用.
+
+[mysqld1]   
+datadir=/dir1     自定义数据库路径.
+port=3307	  端口号.不冲突即可
+socket=/dir1/mysql1.sock  sock文件.
+log-error=/dir1/mysql1.error  错误日志文件.
+pid-file=/dir1/mysql1.pid   启用服务时的pid号.
+
+[mysqld2]
+datadir=/dir2
+port=3308
+socket=/dir2/mysql2.sock
+log-error=/dir2/mysql2.error
+pid-file=/dir2/mysql2.pid
+
+设置的文件.将在启用服务时自动生成.数据库路径需要自己提前创建
+3) 初始化授权库.
+不需要执行手动初始化命令.服务启动会自动初始化
+4) 启动服务.
+]# /usr/local/mysql/bin/mysqld_multi  start 1  启动多实例1服务
+]# ss -ntulp |grep :3307
+]# /usr/local/mysql/bin/mysqld_multi  start 2  启动多实例2服务
+]# ss -ntulp |grep :3308
+5) 测试.
+]#  /usr/local/mysql/bin/mysql -uroot -p  -S /dir/mysql1.sock(指定socket文件.)
+mysql > alter user user() identified by "123456";
+mysql > create database db1;
+mysql > create table db1.a(id int);
+mysql > insert into db1.a values(666);
+测试多实例1数据库是否可用.
+
+]#  /usr/local/mysql/bin/mysql -uroot -p  -S /dir/mysql2.sock(指定socket文件.)
+mysql > alter user user() identified by "123456";
+mysql > create database db2;
+mysql > create table db2.a(id int);
+mysql > insert into db2.a values(666);
+测试多实例2数据库是否可用.
+
+停止某一个实例.
+]#/usr/local/mysql/bin/mysqld_multi --user=root --password=123456 stop 1
+]# ss -ntulp |grep 3307

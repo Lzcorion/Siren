@@ -1,0 +1,382 @@
+192.168.4.55  MYSQL视图. MYSQL存储过程
+学习环境准备
+1.创建db9.user表. 将/etc/passwd 数据导入到该表中.
+2.并在该表的首行 添加id字段为自增长模式
+
+视图view:
+
+视图是保存在数据库中的选择查询,相当于从一个或多个数据表中派生出来的虚拟表。它兼有查询和表的双重功能。
+查询功能：视图保存一个完整的SQL查询命令，相当于给一个查询起了一个名字。简化数据查询和数据处理操作。提高数据的安全性。
+表的功能：视图可以和表一样使用，即操作表的所有命令都可以使用在视图中，但是要注意：视图本身不含有任何数据，每次使用相当于从数据库表中重新查询。
+
+    语法格式:create view  视图名  as  SQL查询
+	     create view  视图名(字段)  as  SQL查询
+	##定义字段名时,字段必须和SQL查询时字段个数一致.
+ 	##
+
+删除视图:   drop view
+查看视图信息: show create view a1;
+
+
+###################字段别名不能冲突,否则视图创建失败##########################
+创建视图时设置别名   AS
+create table t1 select name,uid,shell from user limit 3;
+create table t2 select name,uid,password,shell from user limit6;
+
+mysql> create view v1(a,b,c,d,e,f,g) 
+as
+select * from t1,t2 where t1.name=t2.name and t1.uid=t2.uid
+
+SQL查询语句设置字段别名: AS
+mysql> create view v2 as
+select t1.name as a,t1.uid as b,t1.shell as c,
+t2.name as d,t2.uid as e,t2.homedir as f, t2.password as g
+from t1,t2 
+where t1.name=t2.name and t1.uid=t2.uid;
+
+
+给表起别名:  AS
+SQL查询语句里指定字段别名和表的别名:
+mysql>  create view v3 as
+select a.name as aname , b.name as bname , a.uid as auid , b.uid as buid
+from t1 a left join t2 b on a.uid=b.uid;
+
+OR REPLACE 屏蔽已存在的表去创建视图:
+mysql> create view v3 as select * from user; ##失败
+mysql> create or replace view v3 as select * from user; ##覆盖原有的v3视图
+
+
+具体化Temptable: 每次对视图作访问时(增删改查) 先执行as 后的SQL查询语句 再对视图作访问    select * from v4;  ---- >  缓存
+不指定时Undefine默认Merage:  不单独执行SQL语句查询,直接对视图表作访问
+mysql > crate ALGORITHM=TEMPTABLE view v4 as select name from user;
+
+
+对视图作限制.
+CASCADED 默认  既要满足视图本身的限制,也要满足基表的限制.
+LOCAL 仅检查当前视图的限制.
+
+--with local check option 检查当前视图的限制条件.SQL条件
+
+--with check option  默认CASCADED
+视图的基表也可以是视图. --with check option
+mysql > create view v12 as select * from user where uid <=100;
+mysql > create view v13 as  select * from v12 where uid>=20 with check option;
+既要满足SQL条件查询里的 uid>=20 也要满足uid<=100
+mysql > update v13 set uid=19 where name="nobody";  ###报错
+CHECK OPTION failed 'db9.v13'
+mysql > update v13 set uid=88 where name="nobody";
+Query OK.
+
+
+
+
+存储过程  MYSQL服务里的脚本.
+ - 保存一系列SQL命令的集合.
+ - 可以使用变量 条件判断 流程控制等
+优点: 避免重复编写SQL操作
+      防止对表的直接访问
+      减轻网络负担   (编译执行)
+      提高性能 
+
+存储过程的基本使用(创建 调用 查看 删除)
+
+存储过程写在库里.
+
+创建存储过程的语法格式   
+delimiter //  定义结束符号为//
+create procedure db9.p1()  创建存储过程.  p1为存储过程名
+begin
+   SQL命令;
+   SQL命令;
+end
+//
+delimiter ;
+
+调用
+call  db9.p1();
+
+删除 
+drop procedure db9.p2;
+
+查看
+1.看当前所在库所有
+mysql > use db9;
+mysql > show procedure status;  查看当前库存储过程的状态信息.
+查看有哪些存储过程
+mysql > select  db,name,type  from mysql.proc where type="PROCEDURE"
+查看存储过程的代码   字段:body    
+mysql > select db,name,type,body  from mysql.proc where type="PROCEDURE"  and
+name="check"\G;
+
+更改已定义的存储过程:
+mysql> update mysql.proc set 
+    -> body="begin
+    "> select * from db9.user where shell='/bin/bash';
+    "> end
+    "> //
+    "> "           
+    -> where type="procedure" and name="p1" //
+############################################################################## 
+会话变量:一次访问等于1次会话变量.仅在当次连接有效.当前用户
+查看 show session variables；  
+设置  set session  变量名=值;
+
+全局变量:mysql服务运行启动执行的变量.所有用户生效
+查看 show global variables;
+输出全局变量的值   select @@hostname;
+
+用户变量:   可在当前SQL命令行输出 set@   select @
+设置  set @x=101;
+输出变量名  select @x;
+将命令的查询结果赋值给变量
+mysql > select name into @name from user where name="bin";
+
+局部变量: 只能用在存储过程里. begin----end 之间.
+delimiter //
+create procedure p2()
+begin
+ declare x int;
+ declare name char(3) default "bob";
+ set x=9;
+ select x ,name ;
+end
+//
+delimiter ;
+
+算术运算  + - * / % DIV除法,但只保留整数位.
+delimiter //
+create procedure p3()
+begin
+ declare x int default 0;
+ declare y int default 0;
+ declare z int default 0;
+ select count(name) into x from db9.user where shell="/bin/bash";
+ select count(name) into y from db9.user where shell="/sbin/nologin"
+ set z=x+y;
+ select z;
+end
+//
+delimiter ;
+
+参数类型   in out inout
+in 传递数据给存储过程处理
+out 接收存储过程的处理数据
+inout  传递+接收
+
+in：
+delimiter //
+create procedure p4(in a int, in b int)  默认 in 类型.
+begin
+ declare x int;
+ declare y int;
+ declare z int;
+ set x = a ;
+ set y = b ;
+ set z = x + y;
+ select z;
+end
+//
+delimiter ; 
+
+out:  
+delimiter //
+create procedure p6( out x int ) 
+begin
+select count(id) into x from db9.user;
+select x;
+end
+//
+delimiter ;
+
+call db9.p6(@w)   ##用变量表示
+
+inout:
+delimiter //
+create preocedure p7(inout x int)  
+begin
+select x;         in 功能
+select count (name) into x from db9.user where shell!="/sbin/nologin";
+select x;        out 功能
+end
+//
+delimiter ;
+
+
+call p7(2);  报错
+call p7() ;  报错
+
+set @i=1;
+call p7(@i);
+x=1   --->  x=41  --->   @i=41
+
+
+in:
+delimiter //
+create pname(in username char(50))   传递数据 定义的参数 类型
+begin
+select * from db9.user where name=username;
+end
+//
+delimiter ;
+
+call pname("root");
+
+优点: 方便  隐藏了所查询的表,安全
+
+
+流程控制:
+条件测试. 数值比较.逻辑比较.
+
+
+if 选择结构
+
+单分支结构:
+if 条件测试 then
+  代码...
+end if；
+
+双分支:
+if 条件测试 then 
+  代码...
+else 
+  代码...
+end if；
+
+
+
+循环结构: 
+while条件式循环                 
+	-反复测试条件,只要成立执行命令.
+  while 条件判断  do
+      循环体...
+  end while;
+
+delimiter //
+create procedure p17()
+begin
+ declare x int default 1;
+while x <= 5 do
+ select x;
+ set x=x+1;
+end while;
+end
+//
+delimiter ;  
+
+
+
+
+create procedure p18( in number int )
+begin
+ declare x int default 1;
+ while x <= number do
+ select x;
+ set x=x+1;
+end while;
+end 
+//
+
+
+loop 死循环.   无判断条件，无限制重复执行
+ loop 
+  循环体
+end loop;
+
+
+repeat 循环     --当条件成立时结束循环
+repeat 
+ 循环体...
+ until  条件判断
+end repeat;
+
+delimiter //
+create procedure p21()
+begin 
+ declare x int default 1;
+repeat
+select x;
+set x= x+1;
+until x>5
+end repeat;
+end
+//
+
+
+
+
+流程控制语句 shell ----> break  continue
+mysql中 控制循环语句.  leave  loab1结束循环  iterate loab1跳过当前循环
+
+delimiter //
+create procedure p23()
+begin
+declare x int default 1;
+load1:while x<=10 do
+ LEAVE load1;
+select x;
+set x=x+1;
+end while;
+end
+//
+
+
+
+delimiter //
+create procedure p23()
+begin
+declare x int default 1;
+load1:while x<=10 do
+ if x=6 then
+ LEAVE loab1;
+end if;
+select x;
+set x= x+1;
+end while;
+end
+//
+
+delimiter //
+create procedure p26()
+begin
+declare x int default 1;
+loab1:while x <=10 do
+if  x =6 then
+set x=x+1;
+ITERATE  loab1;
+end if;
+select x;
+set x=x+1;
+end while;
+end
+//
+
+delimiter //
+create procedure p3(in haha int)
+begin
+if haha is null then
+select * from db9.user limit 1;
+else
+select * from db9.user limit haha;
+end if;
+end
+//
+
+delimiter //
+create procedure p4()
+begin
+declare x int;
+declare yline int default 1;
+declare zline int;
+declare k int default 0;
+select count(id) into zline from db9.user;
+while yline <= zline do
+select uid into x from db9.user where id=yline;
+if x%2=0 then
+select name,uid from db9.user where id=yline;
+set k =k+1;
+end if;
+set yline=yline +1;
+end while;
+select k;
+end
+//

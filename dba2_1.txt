@@ -1,0 +1,248 @@
+MYSQL主从同步:
+对指定库的异地同步:
+mysql 主-->从 复制架构实现
+主库主要给客户端使用
+从库连接主库,将数据同步到从库里的服务器
+192.168.4.51 主库
+192.168.4.52 从库
+192.168.4.50 客户端
+
+主: 记录数据更改操作
+-  启用binlog日志
+-  设置binlog日志格式
+-  设置server_id 
+
+从: 会有2个线程, IO  SQL
+IO 负责连接主库,将binlog日志复制到 自身的relay-log
+SQL 读取relay-log 日志,并重现主库的操作.
+
+
+构建思路:
+1.从库数据必须要跟主库数据相同
+2.配置主服务器  启用binlog日志  授权用户 查看当前正在使用的日志
+3.配置从服务器  设置server_id ,指定主库信息
+
+1.生产环境下, 主库完全备份后拷贝给从库
+主库:mysqldump -uroot -p123456 -A > /mysql.bak/allbak.sql
+scp -r  ---> 从库  
+从库--> mysql -uroot -p123456  < /mysql.bak/allbak.sql
+
+2.配置主库:
+(1).启用binlog日志,
+vim /etc/my.cnf
+[mysqld]
+log-bin=master51   ##指定名字,存放在 /var/lib/mysql/master51.*
+server_id=51
+binlog_format="mixed"  ##设置日志类型
+(2).授权用户
+mysql >  grant replication slave on *.* to repluser@"192.168.4.52" identified by "123456";
+(3).查看当前正在使用的日志
+show master status;
+
+3.配置从库:
+(1),测试授权,连接主库
+mysql -h192.168.4.51 -urepluser -p123456
+mysql > show databases;  有查看权限,没有其他权限.
+(2).设置server_id 不能与主库一致
+vim /etc/my.cnf
+[mysqld]
+server_id=52
+(3).指定主库信息. 用自己root登陆到自己的mysql里.
+mysql > show slave status;  查看从库状态.
+添加主库信息:
+mysql > change master to
+master_host="192.168.4.51",master_user="repluser",master_password="123456",
+master_log_file="此处查看51库上的show master status",
+master_log_pos="同上";
+mysql > start slave;
+mysql >show slave status\G;
+必须 	 Slave_IO_Running: yes
+         Slave_SQL_Running:yes  主从同步才能正常运作.
+
+排错:  具体报错信息,show slave status\G
+IO: NO
+主库UUID与从库UUID一致;
+解决:   cd /var/lib/mysql/auto,cnf   记录UUID
+修改UUID, 长度不能变化.只要主与从不相同即可.
+IO:  CONNECTING
+解决: 命令行下尝试登陆主库,
+修改配置参数时,停掉slave
+stop slave;
+change master to .....;
+start slave;
+show slave status;
+
+IO:NO
+SQL:NO
+日志文件读取错误,偏移量;
+change master to  master_log_file="",master_log_pos=   ;
+读取日志文件名跟偏移量一定要与主库一致.
+
+客户端测试:
+主库: mysql > grant all on gamedb.* to webuser@"%" identified by "123456";
+客户端: mysql -uwebuser -h192.168.4.51 -p123456;
+mysql > show grants;
+mysql > create database gamedb;
+mysql > create table gamedb.a(id int);
+mysql > insert into gamedb.a values(100),(110),(120);
+mysql > exit;
+从库查看是否存在gamedb表,存在则实验成功.
+
+
+
+如何把一个从库还原成独立的数据库服务器:
+变成从数据库后,在从库的数据库/var/lib/mysql下, 产生相关文件:
+master.info  主库信息
+relay-bin.xxxxxx  中继日志(从主库拷贝下来的sql命令操作)  --仅保留最新的2个.
+relay-bin.index  中继日志的索引文件.
+relay-log.info   中继日志信息.
+
+临时不同步:  mysql -uroot -p123456
+mysql > stop slave;
+永久不同步:  将slave停止,再删除 相关文件.
+rm -rf /var/lib/mysql/master.info relay-log.info relay-bin.xxxxx relay-bin.index
+systemctl restart mysqld
+mysql -uroot -p123456
+show slave status;
+
+
+主从同步结构
+1.一主一从
+2.一主多从, 一台主库, 多台从库
+3.主从从   53是52的从 52是51的从, 相当于52作主库也作从库. 
+4.主主(互为主从) 彼此作对方主库与存库.不单独使用(发生写冲突),与其他软件合用做高可用集群.
+
+
+配置一主多从:
+与一主一从配
+置方法相同.
+注意从库必须与主库数据一致才能配置成功. 
+主库: 开启binlog日志功能(log-bin=),server_id,授权.
+从库: 配置server_id,进入mysql中指定主库信息.
+客户端测试:
+50机.插入数据. 51和52查看是否有数据.
+
+配置主从从.
+将54.服务器配置为成52的从数据库
+主从数据同步.
+mysql52 ]# mysqldump -uroot -p123456 game > /root/a.sql
+mysql54 ]# mysql -uroot -p123456
+mysql > create database game;
+mysql > use game;
+mysql > source /root/a.sql;
+
+52作54的主库. 修改52的配置文件.启用binlog日志.作授权
+mysql52 ]# vim /etc.my.cnf
+[mysqld]
+server_id=52
+log-bin=master52
+binlog_format="mixed"    ##可写可不写,不写默认日志格式为row.
+systemctl restart mysqld
+mysql -uroot -p123456
+mysql > grant replication slave on *.* to  yaya@"%" identified by "123456";
+mysql > show master status;
+
+mysql54 ]# mysql -uyaya -h192.168.4.52 -p123456  ##检测是否可以登陆.
+mysql54 ]# vim /etc/my.cnf
+[mysqld]
+server_id=54
+systemctl restart mysqld
+登陆到自己的数据库里,设置主库信息.
+mysql -uroot -p123456
+change master to
+master_host="192.168.4.52",master_user="yaya",master_possword="123456",
+master_log_file="master52-xxxxxx",master_log_pos=    ;
+start slave;
+show slave status;
+
+客户端测试:
+50客户端插入数据到51的game.a下,52.53.54 分别查询game.a
+50 ]#  mysql -h192.168.4.51 -uweb -p123456
+mysql > insert into game.a values(55555);
+52.53 为51的从库,因此有50插入的数据.
+52/53 ]# mysql -uroot -p123456
+select * from game.a;
+54为52的从库.发现没有50插入的数据.
+54 ]# mysql -uroot -p123456
+select * from game,a;
+主从同步常用配置选项(主从从)
+log_slave_updates 允许主从从.(链式复制)
+52 ]# vim /etc/my.cnf
+[mysqld]
+
+重点:log_slave_updates   添加该参数.使54能够同步数据.
+
+systemctl restart mysqld
+
+54 ]# mysql -uroot -p123456
+mysql > show slave status;  查看信息确保依旧为主从从.
+
+50 ]# mysql -uroot -p123456
+mysql >select * from game.a;
+mysql > insert into game.a values(101010);
+
+从库52.53 查看 是否插入上条数据.
+54.查看.   添加数据成功.       
+
+
+主主结构.(50和55)
+晚自习配置....
+
+主从从|主主结构  搭配第三方软件结合集群使用.
+配置文件中加入参数:(配置在从数据库时仅对自己有效,对其他从库及主库不生效)
+replicate_do_db database h2
+="xxx,xxx,xxx"  只同步哪个库的数据.
+replicate_ignore_db="xxx,xxx,xxx"   不同步哪个库的数据.
+relay_log= 指定日志名.
+主服务器上配置参数:
+binlog_do_db="xx,xx,xx"   只允许从库同步哪些库.
+binlog_ignore_db="xx,xx,xx"  不允许从库同步哪些库.
+
+主从同步复制模式
+
+ 异步复制:   不关心从库是否接受并处理 50访问主库51,执行插入操作,只要执行完插入造作之后就直接将结果返回给50. 不关心52.53是否存入数据. (客户端响应速度快,弊端:51down,52.53可能丢失部分51的数据.) (默认模式)
+
+全同步复制(组同步):  优点:保证速度完全同步. 弊端:客户端响应速度慢.
+
+生产环境中几乎不使用主从同步及全同步复制.
+
+半同步复制:  介于两者之间. 等到至少一个从库接受完毕即返回响应给客户端.
+
+
+主库和从库起半同步复制.
+
+查看mysql51 mysql53(主库和从库) 是否允许动态加载模块
+show variables like "have_dynamic_loading"   
+sql命令行下.立刻生效.
+
+查看表记录.
+use information_schema
+select PLUGIN_NAME,PLUGIN_STATUS from PLUGINS;
+主库安装插件:
+ mysql> INSTALL PLUGIN rpl_semi_sync_master   SONAME   'semisync_master.so';
+查看模块是否安装成功:
+mysql> SELECT  PLUGIN_NAME, PLUGIN_STATUS FROM INFORMATION_SCHEMA.PLUGINS  WHERE PLUGIN_NAME LIKE '%semi%';
+从库安装插件:
+mysql> INSTALL PLUGIN rpl_semi_sync_slave SONAME  'semisync_slave.so';
+查看模块是否安装成功:
+mysql> SELECT  PLUGIN_NAME, PLUGIN_STATUS FROM INFORMATION_SCHEMA.PLUGINS  WHERE PLUGIN_NAME LIKE '%semi%';
+查看主库是否开启半同步:
+show variables like "rpl_semi_sync_master_enabled";
+查看从库是否开启半同步:
+show variables like "rpl_semi_sync_slave_enabled";
+默认半同步是关闭的.
+打开:
+主库： SET GLOBAL rpl_semi_sync_master_enabled = 1;
+从库： SET GLOBAL rpl_semi_sync_slave_enabled = 1;
+永久启用半同步复制:
+主库:[mysqld]
+plugin-load=rpl_semi_sync_master=semisync_master.so
+rpl_semi_sync_master_enabled=1
+从库:[mysqld]
+plugin-load=rpl_semi_sync_slave=semisync_slave.so
+rpl_semi_sync_slave_enabled=1
+
+
+
+重装mysql时, 需要 将/etc/my.cnf   /var/lib/mysql*  /var/log/mysql* 删除.  否则安装后启用服务时会失败.
+
