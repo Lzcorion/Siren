@@ -1,0 +1,219 @@
+ps	查看进程
+uptime  显示当前事件.系统运行事件.目前登录用户数量》 1 5 15分钟平均负载
+free	显示系统使用和空闲的内存情况.
+swapon -s 交换分区. 
+df -h	显示文件系统信息
+ifconfig
+netstat 或ss  查看端口状态.
+ping		
+traceroute  	路由追踪. 到达目标主机经过哪些路由器.
+iostat 		当前磁盘读写速度
+
+自动化监控系统: Zabbix(基于多种监控机制.支持分布式监控)  
+Nagios (缺点:基于Agent代理,强大的状态检测与报警机制,但没有绘图功能.)
+Cacti(基于简单网络传输协议监控软件,强大绘图能力)
+
+Zabbix.简介   
+- 高度集成的监控解决方案.
+- 实现企业级的开源分布式监控.
+- Zabbix 通过C/S模式采集监控数据.   
+Zabbix为Server   被监控的服务器为Client
+- Zabbix 通过B/S模式实现Web管理.
+浏览器服务器模式.   	Zabbix服务器的web页面 可以实现对服务器的管理.
+
+监控服务器:
+监控服务器可以通过SNMP 或Agent(代理程序) 采集数据.
+数据可以写入 Mysql Oracle 等数据库.
+使用LNMP实现web前端管理.
+
+
+新克隆一台虚拟机. 搭建LNMP.  (192.168.2.5)
+]# yum -y install gcc openssl-devel pcre-devel mariadb mariadb-server mariadb-devel php php-mysql php-fpm 
+]# cd nginx-1.12 ; ./configure --prefix=/usr/local/nginx ;make&& make install
+
+]# vim /usr/local/nginx/conf/nginx.conf
+http{
+… …
+    fastcgi_buffers 8 16k;                      //缓存php生成的页面内容，8个16k
+    fastcgi_buffer_size 32k;                      //缓存php生产的头部信息
+    fastcgi_connect_timeout 300;                 //连接PHP的超时时间
+    fastcgi_send_timeout 300;                     //发送请求的超时时间
+    fastcgi_read_timeout 300;                        //读取请求的超时时间
+location ~ \.php$ {
+                root           html;
+                fastcgi_pass   127.0.0.1:9000;
+                fastcgi_index  index.php;
+                include        fastcgi.conf;
+        }
+启动服务:
+]# systemctl start mariadb  php-fpm  
+]# /usr/local/nginx/sbin/nginx  
+]# ss -ntulp |grep :3306  :9000    :80
+
+创建测试页面:
+]# vim /usr/local/nginx/html/1.php
+<?php
+$i=33;
+echo $i;
+?>
+
+访问测试页面:
+]#  curl 192.168.2.5/1.php
+
+Zabbix.监控拓扑.    部署LNMP.
+
+Zabbix服务跑在LNMP下.所以前提是一定要搭建出LNMP.
+编译安装Zabbix服务.
+]# yum -y install net-snmp-devel curl-devel libevent-devel
+]# ./configure --enable-server --enable-proxy --enable-agent  --with-mysql=/usr/bin/mysql_config  --with-net-snmp --with-libcurl 
+
+
+// --enable-server安装部署zabbix服务器端软件
+// --enable-agent安装部署zabbix被监控端软件
+// --enable-proxy安装部署zabbix代理相关软件
+// --with-mysql配置mysql_config路径
+// --with-net-snmp允许zabbix通过snmp协议监控其他设备
+// --with-libcurl安装相关curl库文件，这样zabbix就可以通过curl连接http等服务，测试被监控主机服务的状态
+
+]# make && make install
+
+初始化zabbix:
+创建数据库与数据库账户:
+
+]# mysql
+mysql > create database zabbix character set utf8;
+mysql > grant all on zabbix.* to zabbix@"localhost" identified by "zabbix";
+需要创建库,名字随意,不需要创建表.  用备份文件创建存储数据的表.
+在zabbix的源码目录下,用database/mysql中 备份存储数据到数据库中.
+顺序 从后到前恢复. schema.sql images.sql data.sql
+
+导入表.
+]# mysql -hlocalhost -uzabbix -pzabbix zabbix < /root/lnmp_snmp/zabbix-3.3.4/database/mysql/schema.sql    
+]# mysql -hlocalhost -uzabbix -pzabbix zabbix < /root/lnmp_snmp/zabbix-3.3.4/database/mysql/images.sql
+]# mysql -hlocalhost -uzabbix -pzabbix zabbix < /root/lnmp_snmp/zabbix-3.3.4/database/mysql/data.sql
+
+上线zabbix网页.
+]# cd /root/lnmp_soft/zabbix-3.4.4/frontends/
+]# cp -r php    /usr/local.nginx/html/zabbix/
+
+修改环境设置:
+]# vim /etc/php.ini
+]# firefox 192.168.2.5/zabbix/index.php 
+ PHP option  徐昂向文Fail时,修改 /etc/php.ini 配置文件.
+修改成Required中的参数.
+
+]# cd /root/lnmp_snmp
+]# yum -y install php-bcmath-5.4.16-42.el7.x86_64.rpm php-mbstring-5.4.16-42.el7.x86_64.rpm
+]# yum -y install php-gd php-xml php-ldap 
+]# systemctl restart php-fpm  
+刷新zabbix/index.php 页面. 全部显示OK即可下一步.
+
+输入主机,端口,数据库的用户名及密码
+
+Zabbix server details  监控服务器的信息.
+Host  192.168.2.5
+Port 10051	//Zabbix默认端口10051
+Name monitor    //随意.
+
+Pre-installation summary  数据库服务器的信息,确认后下一步.
+Install 	报错.
+Cannot create the configuration file.
+Details
+Unable to create the configuration file.
+Alternatively, you can install it manually:
+1.Download the configuration file
+2.Save it as "/usr/local/nginx/html/zabbix/conf/zabbix.conf.php"
+在该目录下 必须让其他用户拥有写权限.才能成功.
+]# chmod o+w /usr/local/nginx/html/zabbix/conf
+
+登录管理页面:
+Username    admin
+Password    zabbix
+
+监控服务运不运行不影响页面.
+
+启动zabbix server 服务.
+1.修改配置文件
+]# cd /usr/local/zabbix/etc
+]# vim zabbix_server.conf    //监控服务的主配置文件.
+38 LogFile=/tmp/zabbix_server.log //日志文件》
+85 # DBHost=localhost 		//默认数据库为本机.
+95 DBName=zabbix 	//数据库名为zabbix
+111 DBUSER=zabbix 	//连接数据库的用户名为zabbix
+119 DBPASSword=zabbix  	//连接数据库的密码为zabbix
+:wq
+
+2.创建启动脚本
+进入源码目录下,拷贝启动脚本.
+]# cd /root/lnmp_soft/zabbix-3.4.4/misc/init.d/fedora/core
+]# cp /root/lnmp_soft/zabbix-3.4.4/misc/init.d/fedora/core/zabbix_server   /etc/init.d/
+]# chmod +x /etc/init.d/zabbix_server
+]# useradd zabbix
+]# sed -i '22s;/usr/local;/usr/local/zabbix;'   /etc/init.d/zabbix_server
+]# /etc/init.d/zabbix_server start  		//启动服务.
+
+
+如果在源码安装时没有指定路径,直接使用命令。zabbix_server 启动服务. 
+停止服务  killall -9 zabbix_server
+如果第一次安装没有指定路径,第二次重新安装后,会默认优先调用/usr/local/etc/zabbix_server  而不是 /usr/local/zabbix/sbin/zabbix_server
+
+zabbix 监控软件的基本使用
+1.修改管理员admin的密码.
+ 网络页面头像修改.
+2.查看已经监控的主机
+3.查看监控的模版
+4.
+
+被监控主机: 安装Agent或SNMP协议.
+
+安装zabbix 软件. 192.168.2.100 192.168.2.200 
+]# yum -y install gcc pcre-devel
+]# useradd -s /sbin/nologin zabbix
+]# tar -xf zabbix-3.4.4.tar.gz
+]# cd zabbix-3.4.4
+]# /configure --prefix=/usr/local/zabbix --enable-agent
+]# make install 
+修改配置文件.  
+]# vim /usr/local/zabbix/etc/zabbix_agentd.conf
+ 30 LogFile=/tmp/zabbix_agentd.log 	//日志文件
+ 93 Server=127.0.0.1,192.168.2.5	//谁可以监控本机(被动)
+134 ServerActive=192.168.2.5:10051		//谁可以监控本机(主动)
+创建运行脚本:
+]# cp /root/lnmp_snmp/zabbix-3.4.4/misc/init.d/fedora/core/zabbix_agentd  /etc/init.d    //源码目录下拷贝运行脚本》
+]# sed -i '22s*/usr/local*/usr/local/zabbix*'  /etc/init.d/zabbix_agentd
+]# sed -n '22p'  /etc/init.d/zabbix_agentd
+启动服务:
+]# /etc/init.d/zabbix_agentd   start
+]# ss -tnulp |grep :10050
+
+配置监控服务器192.168.2.5
+使用管理员admin帐号,登录管理页面.做如下操作.
+配置主机---> 创建主机 --->主机名称(server100),群组(linux server),ip地址(192.168.2.100) ---> 指定监控模块 主机,server100,模块,链接的模版 --->  查看监控信息
+
+自定义监控(在客户端定义监控命令,让监控服务器调用)
+客户端配置 192.168.2.100
+启用自定义监控项
+]# vim /usr/local/zabbix/etc/zabbix_agentd.conf
+280 UnsafeUserParameters=1    	//启用自定义监控项. 0是不启用
+265  Include=/usr/local/zabbix/etc/zabbix_agentd.conf.d/*.conf  //指定监控命令文件路径.
+:wq
+
+定义监控命令
+创建定义的监控文件
+]# vim /usr/local/zabbix/etc/zabbix_agentd.conf.d/sumusers.conf
+#       Format: UserParameter=<key>,<shell command>  //定义监控命令的格式
+  UserParameter=getsum_users,wc -l /etc/passwd |awk '{print$1}'
+:wq
+
+重启zabbix_agent 服务
+]# /etc/init.d/zabbix_agentd stop
+]# /etc/init.d/zabbix_agentd start
+
+测试定义监控命令
+]# /usr/local/zabbix/bin/zabbix_get -s 127.0.0.1 -p 10050 -k getsum_users
+
+监控服务器配置  192.168.2.5
+测试客户端定义监控命令
+]# /usr/local/zabbix/bin/zabbix_get -s 192.168.2.100 -p 10050 -k getsum_users
+创建新监控模版---创建应用集---创建监控项---指定监控命令---调用新创建的监控模版---查看监控信息
+
